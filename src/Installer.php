@@ -63,14 +63,19 @@ class Installer
             }
         }
 
-        /** @var PDO pdo */
+        /** @var \PDO pdo */
         $host = $this->connection['host'];
         $dbname = $this->connection['db'];
-        $this->pdo = new \PDO(
-            "mysql:host=$host;dbname=$dbname",
-            $this->connection['user'],
-            $this->connection['pwd']
-        );
+        try {
+            $this->pdo = new \PDO(
+                "mysql:host=$host;dbname=$dbname",
+                $this->connection['user'],
+                $this->connection['pwd']
+            );
+            $this->pdo->setAttribute(\PDO::ATTR_ERRMODE, \PDO::ERRMODE_EXCEPTION);
+        } catch (\PDOException $e) {
+            $this->log($e);
+        }
     }
 
     public function getSqlDirectory()
@@ -90,6 +95,8 @@ class Installer
             if (isset($txtContents[0])) {
                 $this->version = $txtContents[0];
             }
+        } else {
+            file_put_contents($this->getSqlDirectory() . 'version.txt', '0.0.1');
         }
 
         return $this->version;
@@ -102,7 +109,14 @@ class Installer
 
         $sql = array();
         foreach ($fileList as $fileName) {
-            $sql[str_replace('.sql', '', $fileName)] = file_get_contents($this->getSqlDirectory() . $fileName);
+            $parts = explode('.', $fileName);
+            if ($parts[count($parts) - 1] == 'sql') {
+                $sql[str_replace('.sql', '', $fileName)] = file_get_contents($this->getSqlDirectory() . $fileName);
+            }
+        }
+
+        if (isset($sql['version.txt'])) {
+            unset($sql['version.txt']);
         }
 
         return $sql;
@@ -123,9 +137,16 @@ class Installer
         foreach ($updates as $version => $statements) {
             if ($version > $this->getCurrentVersion()  && $version <= $toVersion) {
                 foreach (explode(';', $statements) as $statement) {
+                    $statement = str_replace(array("\n", "\r"), '', $statement) . ';';
+
+                    //Don't exec new lines
+                    if ($statement == ';') {
+                        continue;
+                    }
+
                     try {
                         $this->pdo->exec($statement);
-                    } catch (\Exception $e) {
+                    } catch (\PDOException $e) {
                         $this->log($e);
                     }
                 }
